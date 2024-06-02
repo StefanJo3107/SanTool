@@ -1,0 +1,3 @@
+compiler_path = "/home/stefan/Dev/SanScript/target/release/san_compiler"
+vm_path = "/home/stefan/Dev/SanScript/target/release/san_vm"
+sanusb_path = "/home/stefan/Dev/SanScript/san-usb"
