@@ -32,12 +32,18 @@ struct ConfigArgs{
 
 #[derive(Args)]
 struct CompileArgs{
+    #[arg(short, long)]
     source_path: String,
+    #[arg(short, long)]
     output_path: Option<String>,
 }
 
 #[derive(Args)]
 struct FlashArgs{
-    source_path: String,
+    #[arg(short, long)]
+    source_path: Option<String>,
+    #[arg(short, long)]
+    bytecode_path: Option<String>,
+    #[arg(short, long)]
     config_path: String
 }

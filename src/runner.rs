@@ -1,9 +1,10 @@
 use std::{fs, io};
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+use std::process::Stdio;
 use clap::{Command, Parser};
-use crate::{Cli, Commands, CompileArgs, ConfigArgs};
+use crate::{Cli, Commands, CompileArgs, ConfigArgs, FlashArgs};
 
 pub fn run() {
     let cli = Cli::parse();
@@ -16,7 +17,7 @@ pub fn run() {
             compile(args);
         }
         Commands::Flash(args) => {
-            println!("'santool flash' was used, values are: {:?}", args.config_path)
+            flash(args);
         }
     }
 }
@@ -77,4 +78,58 @@ pub fn compile(config: &CompileArgs) {
         .output()
         .expect("failed to execute process");
     io::stdout().write_all(&output.stdout).unwrap();
+}
+
+pub fn flash(config: &FlashArgs) {
+    if !Path::new("./config.toml").exists() {
+        panic!("config.toml doesn't exist! Run santool config --help for more info!");
+    }
+
+    let config_file = fs::read_to_string("./config.toml").expect("Unable to read file config.toml!");
+    let config_toml: ConfigArgs = toml::from_str(config_file.as_str()).expect("Unable to deserialize file config.toml!");
+
+    if let None = config_toml.compiler_path {
+        panic!("SanUSB path is not defined in config.toml! Run santool config --help for more info!");
+    }
+    let mut sanusb_path = config_toml.sanusb_path.clone().unwrap();
+    let config_path = config.config_path.clone();
+    std::process::Command::new("cp")
+        .args([config_path, sanusb_path])
+        .output()
+        .expect("failed to execute process");
+
+    sanusb_path = config_toml.sanusb_path.clone().unwrap();
+    if let Some(bytecode) = &config.bytecode_path {
+        std::process::Command::new("cp")
+            .args([bytecode, &(sanusb_path + "/payload.sanb")])
+            .output()
+            .expect("failed to execute process");
+    } else if let Some(source) = &config.source_path {
+        if let None = config_toml.compiler_path {
+            panic!("Compiler path is not defined in config.toml! Run santool config --help for more info!");
+        }
+
+        let output = std::process::Command::new(config_toml.compiler_path.unwrap())
+            .args([source, &(sanusb_path + "/payload.sanb")])
+            .output()
+            .expect("failed to execute process");
+        io::stdout().write_all(&output.stdout).unwrap();
+    } else {
+        panic!("Neither souce path nor bytecode path are defined! Run santool flash --help for more info!")
+    }
+
+    sanusb_path = config_toml.sanusb_path.clone().unwrap();
+    let mut cmd = std::process::Command::new("sh")
+        .args(["-c", "cargo run"])
+        .current_dir(sanusb_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("failed to execute process");
+
+    let output = BufReader::new(cmd.stdout.take().unwrap());
+
+    output.lines().for_each(|line| {
+        println!("output: {}", line.unwrap());
+    })
 }
