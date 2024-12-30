@@ -1,17 +1,20 @@
 use std::{fs, io};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write, copy};
 use std::path::Path;
+use std::env;
 use std::process::Stdio;
-use clap::{Command, Parser};
+use clap::Parser;
 use crate::{Cli, Commands, CompileArgs, ConfigArgs, FlashArgs};
 
 pub fn run() {
     let cli = Cli::parse();
 
     match &cli.command {
+        Commands::Download => {
+            _ = download_deps();
+        }
         Commands::Config(args) => {
-            parse_config(args);
+            config(args);
         }
         Commands::Compile(args) => {
             compile(args);
@@ -22,10 +25,58 @@ pub fn run() {
     }
 }
 
-pub fn parse_config(config: &ConfigArgs) {
+fn download_deps() -> Result<(), Box<dyn std::error::Error>>{
+    let santool_path = match env::current_exe() {
+        Ok(exe_path) => exe_path,
+        Err(e) => panic!("failed to get santool path: {e}"),
+    };
+
+    let sanc_response =
+        reqwest::blocking::get("https://github.com/StefanJo3107/SanScript/releases/download/v1.0.0/san_compiler")?;
+
+    if sanc_response.status().is_success() {
+        let mut file = BufWriter::new(fs::File::create("san_compiler")?);
+        let content = sanc_response.bytes()?;
+        copy(&mut content.as_ref(), &mut file)?;
+        println!("SanCompiler downloaded successfully!");
+    } else {
+        println!("Failed to download file. Status: {}", sanc_response.status());
+    }
+
+    let sanvm_response =
+        reqwest::blocking::get("https://github.com/StefanJo3107/SanVM/releases/download/v1.0.0/san_vm")?;
+
+    if sanvm_response.status().is_success() {
+        let mut file = BufWriter::new(fs::File::create("san_vm")?);
+        let content = sanvm_response.bytes()?;
+        copy(&mut content.as_ref(), &mut file)?;
+        println!("SanVM downloaded successfully!");
+    } else {
+        println!("Failed to download file. Status: {}", sanvm_response.status());
+    }
+
+    std::process::Command::new("git")
+        .args(["clone", "--recurse-submodules", "https://github.com/StefanJo3107/SanScript.git"])
+        .output()
+        .expect("failed to execute git clone process");
+
+    config(&ConfigArgs {compiler_path: Some(format!("{}/{}", santool_path.parent().unwrap().to_str().unwrap(), "san_compiler")),
+    vm_path: Some(format!("{}/{}", santool_path.parent().unwrap().to_str().unwrap(), "san_vm")),
+    sanusb_path: Some(format!("{}/{}", santool_path.parent().unwrap().to_str().unwrap(), "SanScript/san-usb")),
+    infra_path: None});
+
+    Ok(())
+}
+
+fn config(config: &ConfigArgs) {
+    let santool_path = match env::current_exe() {
+        Ok(exe_path) => exe_path,
+        Err(e) => panic!("failed to get santool path: {e}"),
+    };
+    let config_path = format!("{}/{}", santool_path.parent().unwrap().to_str().unwrap(), "config.toml");
     let mut final_config = ConfigArgs { compiler_path: None, vm_path: None, sanusb_path: None, infra_path: None };
-    if Path::new("./config.toml").exists() {
-        let config_file = fs::read_to_string("./config.toml").expect("Unable to read file config.toml!");
+    if Path::new(config_path.as_str()).exists() {
+        let config_file = fs::read_to_string(config_path.as_str()).expect("Unable to read file config.toml!");
         final_config = toml::from_str(config_file.as_str()).expect("Unable to deserialize file config.toml!");
     }
 
@@ -45,15 +96,21 @@ pub fn parse_config(config: &ConfigArgs) {
         final_config.infra_path = Some(infra_path.clone());
     }
 
-    fs::write("./config.toml", toml::to_string(&final_config).expect("Unable to serialize config to toml!")).expect("Unable to write file");
+    fs::write(config_path, toml::to_string(&final_config).expect("Unable to serialize config to toml!")).expect("Unable to write file");
 }
 
-pub fn compile(config: &CompileArgs) {
-    if !Path::new("./config.toml").exists() {
+fn compile(config: &CompileArgs) {
+    let santool_path = match env::current_exe() {
+        Ok(exe_path) => exe_path,
+        Err(e) => panic!("failed to get santool path: {e}"),
+    };
+    let config_path = format!("{}/{}", santool_path.parent().unwrap().to_str().unwrap(), "config.toml");
+
+    if !Path::new(config_path.as_str()).exists() {
         panic!("config.toml doesn't exist! Run santool config --help for more info!");
     }
 
-    let config_file = fs::read_to_string("./config.toml").expect("Unable to read file config.toml!");
+    let config_file = fs::read_to_string(config_path.as_str()).expect("Unable to read file config.toml!");
     let config_toml: ConfigArgs = toml::from_str(config_file.as_str()).expect("Unable to deserialize file config.toml!");
 
     if let None = config_toml.compiler_path {
@@ -80,12 +137,18 @@ pub fn compile(config: &CompileArgs) {
     io::stdout().write_all(&output.stdout).unwrap();
 }
 
-pub fn flash(config: &FlashArgs) {
-    if !Path::new("./config.toml").exists() {
+fn flash(config: &FlashArgs) {
+    let santool_path = match env::current_exe() {
+        Ok(exe_path) => exe_path,
+        Err(e) => panic!("failed to get santool path: {e}"),
+    };
+    let config_path = format!("{}/{}", santool_path.parent().unwrap().to_str().unwrap(), "config.toml");
+
+    if !Path::new(config_path.as_str()).exists() {
         panic!("config.toml doesn't exist! Run santool config --help for more info!");
     }
 
-    let config_file = fs::read_to_string("./config.toml").expect("Unable to read file config.toml!");
+    let config_file = fs::read_to_string(config_path.as_str()).expect("Unable to read file config.toml!");
     let config_toml: ConfigArgs = toml::from_str(config_file.as_str()).expect("Unable to deserialize file config.toml!");
 
     if let None = config_toml.compiler_path {
@@ -130,6 +193,6 @@ pub fn flash(config: &FlashArgs) {
     let output = BufReader::new(cmd.stdout.take().unwrap());
 
     output.lines().for_each(|line| {
-        println!("output: {}", line.unwrap());
+        println!("{}", line.unwrap().trim());
     })
 }

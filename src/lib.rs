@@ -13,6 +13,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    Download,
     Config(ConfigArgs),
     Compile(CompileArgs),
     Flash(FlashArgs)
